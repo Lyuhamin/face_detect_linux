@@ -18,15 +18,16 @@ for root, dirs, files in os.walk(DATASET_PATH):
         if file.endswith('.jpg') or file.endswith('.jpeg'):
             try:
                 img_path = os.path.join(root, file)
-                img = Image.open(img_path)  # PIL을 사용해 이미지 열기
-                img.verify()  # 이미지 파일 무결성 확인
+                with Image.open(img_path) as img:
+                    img.verify()  # 이미지 파일 무결성 확인
             except (IOError, SyntaxError) as e:
                 print(f"손상된 이미지 발견 및 제거: {img_path}")
                 os.remove(img_path)  # 손상된 파일 삭제
 
 # 데이터셋 불러오기
 def load_datasets(batch_size=32, img_size=(299, 299)):
-    train_dataset = image_dataset_from_directory(
+    # 손상된 이미지를 무시하기 전에 class_names를 먼저 가져옵니다.
+    raw_train_dataset = image_dataset_from_directory(
         DATASET_PATH,
         validation_split=0.2,
         subset="training",
@@ -34,6 +35,9 @@ def load_datasets(batch_size=32, img_size=(299, 299)):
         image_size=img_size,
         batch_size=batch_size
     )
+    class_names = raw_train_dataset.class_names  # class_names 저장
+
+    train_dataset = raw_train_dataset.apply(tf.data.experimental.ignore_errors())
     
     validation_dataset = image_dataset_from_directory(
         DATASET_PATH,
@@ -42,9 +46,9 @@ def load_datasets(batch_size=32, img_size=(299, 299)):
         seed=123,
         image_size=img_size,
         batch_size=batch_size
-    )
+    ).apply(tf.data.experimental.ignore_errors())
     
-    return train_dataset, validation_dataset
+    return train_dataset, validation_dataset, class_names
 
 # GoogleNet (Inception-V3) 모델 정의
 def build_googlenet_model(num_classes):
@@ -63,10 +67,10 @@ if __name__ == "__main__":
     IMG_SIZE = (299, 299)
 
     # 데이터셋 로드
-    train_dataset, validation_dataset = load_datasets(batch_size=BATCH_SIZE, img_size=IMG_SIZE)
+    train_dataset, validation_dataset, class_names = load_datasets(batch_size=BATCH_SIZE, img_size=IMG_SIZE)
 
     # 클래스 수 확인
-    num_classes = len(train_dataset.class_names)
+    num_classes = len(class_names)
     print("클래스 수:", num_classes)
 
     # 모델 생성
@@ -78,7 +82,7 @@ if __name__ == "__main__":
                   metrics=['accuracy'])
 
     # 모델 학습
-    history = model.fit(train_dataset, validation_data=validation_dataset, epochs=10)
+    history = model.fit(train_dataset, validation_data=validation_dataset, epochs=50)
 
     # 학습 및 검증 정확도 그래프 그리기
     plt.plot(history.history['accuracy'], label='Training Accuracy')
